@@ -21,9 +21,11 @@ class GAN(nn.Module):
 
         self.batch_size = 10 # change
 
+        self.latent_dim = 1
+
     def generate(self, n):
 
-        zs = torch.randn((n, 1))
+        zs = torch.randn((n, self.latent_dim))
         examples = self.generator.forward(zs)
         return examples
 
@@ -38,7 +40,8 @@ class GAN(nn.Module):
         fake_preds = self.decide(generated_examples)
         true_preds = self.decide(X_batch)
 
-        value = torch.sum(torch.log(true_preds)) + torch.sum(torch.log(1 - fake_preds)) # add a switch for 1 - log trick which helps to avoid saturation
+         #  - torch.sum(torch.log(fake_preds + 0.0001))  #
+        value = torch.sum(torch.log(true_preds + 0.0001)) + torch.sum(torch.log1p(-fake_preds + 0.0001)) # add a switch for 1 - log trick which helps to avoid saturation
 
         value = value / (self.batch_size * 2) # taking the mean
 
@@ -48,8 +51,9 @@ class GAN(nn.Module):
         generated_examples = self.generator.forward(z_batch)
         fake_preds = self.decide(generated_examples)
 
-        value = -torch.sum(torch.log(fake_preds))  # add a switch for 1 - log trick which helps to avoid saturation
-        value = value / (self.batch_size)  # taking the mean
+        #value = torch.mean(torch.log(fake_preds + 0.0001)) #-torch.mean(torch.log1p(-fake_preds + 0.0001))  # add a switch for 1 - log trick which helps to avoid saturation
+        value = -torch.mean(torch.log1p(-fake_preds + 0.0001))
+
 
         return value
 
@@ -68,39 +72,45 @@ class GAN(nn.Module):
             inds = np.random.randint(N, size=self.batch_size)
             inds = torch.LongTensor(inds)
 
-            z_batch = Variable(torch.randn(self.batch_size, 1))
+            z_batch = Variable(torch.randn(self.batch_size, self.latent_dim))
             X_batch = Variable(X[inds])
 
-            value = -self.calculate_game_value(z_batch, X_batch)
-            value.backward(retain_graph=True)
-
+            discriminator_loss = -self.calculate_game_value(z_batch, X_batch)
+            discriminator_loss.backward()
             self.discriminator_optimizer.step()
-
-            neg_value = -value
-            vals.append(neg_value)
-
-            neg_value.backward()
-            self.generator_optimizer.step()
-
             self.discriminator_optimizer.zero_grad()
+
+            vals.append(-discriminator_loss.data.numpy())
+
+            z_batch = Variable(torch.randn(self.batch_size, self.latent_dim))
+            generator_loss = -self.calculate_generator_score(z_batch)
+
+            generator_loss.backward()
+            self.generator_optimizer.step()
             self.generator_optimizer.zero_grad()
+            self.discriminator_optimizer.zero_grad()
 
         return vals
 
 if __name__ == "__main__":
 
-    data = torch.randn((100, 1))
+    data = torch.rand((1000, 1))
+    latent_dim = 1
 
     generator = torch.nn.Sequential(
-        torch.nn.Linear(1, 10),
+        torch.nn.Linear(latent_dim, 100),
         torch.nn.ReLU(),
-        torch.nn.Linear(10, data.shape[1]),
+        torch.nn.Linear(100, 100),
+        torch.nn.ReLU(),
+        torch.nn.Linear(100, data.shape[1]),
     )
 
     discriminator = torch.nn.Sequential(
-        torch.nn.Linear(data.shape[1], 20),
+        torch.nn.Linear(data.shape[1], 100),
         torch.nn.ReLU(),
-        torch.nn.Linear(20, 1),
+        torch.nn.Linear(100, 100),
+        torch.nn.ReLU(),
+        torch.nn.Linear(100, 1),
         torch.nn.Sigmoid()
     )
 
@@ -108,13 +118,22 @@ if __name__ == "__main__":
     optim_discriminator = torch.optim.Adam
 
     gan = GAN(generator, discriminator, optim_generator, optim_discriminator)
-    vals = gan.train(data, 10000)
 
-    plt.figure()
-    xs = Variable(torch.FloatTensor(np.linspace(-5, 5, 1000).reshape(1000, 1)))
-    preds = gan.decide(xs)
-    plt.plot(xs.data.numpy(), preds.data.numpy())
-    plt.show()
+
+    for i in range(500):
+        vals = gan.train(data, 1)
+
+        plt.figure()
+        xs = Variable(torch.FloatTensor(np.linspace(-10, 10, 10000).reshape(10000, 1)))
+        preds = gan.decide(xs)
+        plt.plot(xs.data.numpy(), preds.data.numpy())
+
+        maps_gen = gan.generator.forward(xs)
+        plt.plot(xs.data.numpy(), maps_gen.data.numpy())
+
+        plt.savefig("./figs/{}".format(i))
+        plt.close()
+
 
     plt.figure()
     plt.hist(gan.generate(100000).data.numpy())
@@ -123,3 +142,6 @@ if __name__ == "__main__":
     plt.figure("Game Values")
     plt.plot(vals)
     plt.show()
+
+    gan.decide(gan.generate(100))
+    gan.decide(data)
