@@ -3,15 +3,13 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from matplotlib import pyplot as plt
-
 from torch.autograd import Variable
 
 # to_do: Add flexible CUDA support
 
 class GAN(nn.Module):
 
-    def __init__(self, generator, discriminator, optimizer_g, optimizer_d):
+    def __init__(self, generator, discriminator, optimizer_g, optimizer_d, latent_dim, batch_size):
         super().__init__()
         self.generator = generator
         self.discriminator = discriminator
@@ -19,9 +17,9 @@ class GAN(nn.Module):
         self.generator_optimizer = optimizer_g(self.generator.parameters())
         self.discriminator_optimizer = optimizer_d(self.discriminator.parameters())
 
-        self.batch_size = 10 # change
+        self.batch_size = batch_size # change
 
-        self.latent_dim = 1
+        self.latent_dim = latent_dim
 
     def generate(self, n):
 
@@ -57,7 +55,7 @@ class GAN(nn.Module):
 
         return value
 
-    def train(self, X, n_updates):
+    def train(self, X, n_updates, verbose=True):
 
         N = X.size(0)
 
@@ -65,7 +63,7 @@ class GAN(nn.Module):
 
         for i in range(n_updates):
 
-            if not i % 1000:
+            if not i % 1000 and verbose:
                 print("Update number {}".format(i))
 
 
@@ -94,45 +92,45 @@ class GAN(nn.Module):
 
 if __name__ == "__main__":
 
+    from matplotlib import pyplot as plt
+
     data = torch.rand((1000, 1))
     latent_dim = 1
 
     generator = torch.nn.Sequential(
-        torch.nn.Linear(latent_dim, 100),
+        torch.nn.Linear(latent_dim, 500),
         torch.nn.ReLU(),
-        torch.nn.Linear(100, 100),
+        torch.nn.Linear(500, 500),
         torch.nn.ReLU(),
-        torch.nn.Linear(100, data.shape[1]),
+        torch.nn.Linear(500, data.shape[1]),
     )
 
     discriminator = torch.nn.Sequential(
-        torch.nn.Linear(data.shape[1], 100),
+        torch.nn.Linear(data.shape[1], 500),
         torch.nn.ReLU(),
-        torch.nn.Linear(100, 100),
+        torch.nn.Linear(500, 500),
         torch.nn.ReLU(),
-        torch.nn.Linear(100, 1),
+        torch.nn.Linear(500, 1),
         torch.nn.Sigmoid()
     )
 
     optim_generator = torch.optim.Adam
     optim_discriminator = torch.optim.Adam
 
-    gan = GAN(generator, discriminator, optim_generator, optim_discriminator)
+    gan = GAN(generator, discriminator, optim_generator, optim_discriminator, latent_dim)
 
+    vals = gan.train(data, 6000)
 
-    for i in range(500):
-        vals = gan.train(data, 1)
+    plt.figure()
+    xs = Variable(torch.FloatTensor(np.linspace(-10, 10, 10000).reshape(10000, 1)))
+    preds = gan.decide(xs)
+    plt.plot(xs.data.numpy(), preds.data.numpy())
 
-        plt.figure()
-        xs = Variable(torch.FloatTensor(np.linspace(-10, 10, 10000).reshape(10000, 1)))
-        preds = gan.decide(xs)
-        plt.plot(xs.data.numpy(), preds.data.numpy())
+    maps_gen = gan.generator.forward(xs)
+    plt.plot(xs.data.numpy(), maps_gen.data.numpy())
 
-        maps_gen = gan.generator.forward(xs)
-        plt.plot(xs.data.numpy(), maps_gen.data.numpy())
+   # plt.savefig("./figs/{}".format(i))
 
-        plt.savefig("./figs/{}".format(i))
-        plt.close()
 
 
     plt.figure()
